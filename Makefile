@@ -5,8 +5,9 @@ PKG=$(NAME)-$(VERSION)
 
 archive:
 	rm -f ../$(PKG).tar.gz ../$(PKG).zip
-	git archive --format=zip --prefix=$(PKG)/ > ../$(PKG).zip
-	git archive --format=tar --prefix=$(PKG)/ | gzip ../$(PKG).tar.gz
+#	git log > ChangeLog
+	git archive --format=zip --prefix=$(PKG)/ HEAD > ../$(PKG).zip
+	git archive --format=tar --prefix=$(PKG)/ HEAD | gzip > ../$(PKG).tar.gz
 
 clean:
 	rm -f *~
