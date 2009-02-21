@@ -1,0 +1,26 @@
+Nginx module to use SPNEGO+GSSAPI+Kerberos for http SSO authentication
+======================================================================
+
+Compilation
+-----------
+
+When compiling from source build as usual adding the -add-module option:
+
+  ./configure --add-module=$PATH_TO_MODULE
+
+inside top Ngix source directory.
+
+Configuration
+-------------
+
+The module only has following directives:
+
+
+
+Examples
+--------
+
+
+
+Additional steps...
+-------------------
