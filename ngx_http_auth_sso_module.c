@@ -87,4 +87,10 @@ ngx_http_auth_pam_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
   ngx_conf_merge_str_value(conf->keytab, prev->keytab, "/etc/krb5.keytab");
   ngx_conf_merge_str_value(conf->srvcname, prev->srvcname, "HTTP");
 
-  
+  ngx_conf_log_error(NGX_LOG_EMERG, cf, 0, "protect = %i", conf->protect);
+  ngx_conf_log_error(NGX_LOG_EMERG, cf, 0, "realm = %s", conf->realm.data);
+  ngx_conf_log_error(NGX_LOG_EMERG, cf, 0, "keytab = %s", conf->keytab.data);
+  ngx_conf_log_error(NGX_LOG_EMERG, cf, 0, "srvcname = %s", conf->srvcname.data);
+
+  return NGX_CONF_OK;
+}
