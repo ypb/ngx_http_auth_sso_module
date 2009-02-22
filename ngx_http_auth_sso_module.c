@@ -9,6 +9,11 @@
 #include <ngx_core.h>
 #include <ngx_http.h>
 
+static void *ngx_http_auth_sso_create_loc_conf(ngx_conf_t*);
+static char *ngx_http_auth_sso_merge_loc_conf(ngx_conf_t*, void*, void*);
+
+/* Module Configuration Struct(s) (main|srv|loc) */
+
 typedef struct {
   ngx_flag_t protect;
   ngx_str_t realm;
@@ -16,7 +21,18 @@ typedef struct {
   ngx_str_t srvcname;
 } ngx_http_auth_sso_loc_conf_t;
 
+/* Module Directives */
+
 static ngx_command_t ngx_http_auth_sso_commands[] = {
+
+  /*
+     { ngx_str_t name;
+       ngx_uint_t type;
+       char *(*set)(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+       ngx_uint_t conf;
+       ngx_uint_t offset;
+       void *post; }
+  */
 
   { ngx_string("auth_sso"),
     NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
@@ -50,7 +66,9 @@ static ngx_command_t ngx_http_auth_sso_commands[] = {
   ngx_null_command
 };
 
-statix ngx_http_module_t ngx_http_auth_sso_module_ctx = {
+/* Module Context */
+
+static ngx_http_module_t ngx_http_auth_sso_module_ctx = {
   NULL, /* preconf */
   NULL, /* postconf */
 
@@ -62,6 +80,26 @@ statix ngx_http_module_t ngx_http_auth_sso_module_ctx = {
 
   ngx_http_auth_sso_create_loc_conf, /* create location conf */
   ngx_http_auth_sso_merge_loc_conf /* merge with server */
+};
+
+/* Module Definition */
+
+/* really ngx_module_s /shrug */
+ngx_module_t ngx_http_auth_sso_module = {
+  /* ngx_uint_t ctx_index, index, spare{0-3}, version; */
+  NGX_MODULE_V1, /* 0, 0, 0, 0, 0, 0, 1 */
+  &ngx_http_auth_sso_module_ctx, /* void *ctx */
+  ngx_http_auth_sso_commands, /* ngx_command_t *commands */
+  NGX_HTTP_MODULE, /* ngx_uint_t type = 0x50545448 */
+  NULL, /* ngx_int_t (*init_master)(ngx_log_t *log) */
+  NULL, /* ngx_int_t (*init_module)(ngx_cycle_t *cycle) */
+  NULL, /* ngx_int_t (*init_process)(ngx_cycle_t *cycle) */
+  NULL, /* ngx_int_t (*init_thread)(ngx_cycle_t *cycle) */
+  NULL, /* void (*exit_thread)(ngx_cycle_t *cycle) */
+  NULL, /* void (*exit_process)(ngx_cycle_t *cycle) */
+  NULL, /* void (*exit_master)(ngx_cycle_t *cycle) */
+  NGX_MODULE_V1_PADDING /* 0, 0, 0, 0, 0, 0, 0, 0 */
+  /* uintptr_t spare_hook{0-7}; */
 };
 
 static void *
@@ -78,10 +116,10 @@ ngx_http_auth_sso_create_loc_conf(ngx_conf_t *cf)
 }
 
 static char *
-ngx_http_auth_pam_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
+ngx_http_auth_sso_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
 {
-  ngx_http_auth_pam_loc_conf_t *prev = parent;
-  ngx_http_auth_pam_loc_conf_t *conf = child;
+  ngx_http_auth_sso_loc_conf_t *prev = parent;
+  ngx_http_auth_sso_loc_conf_t *conf = child;
 
   ngx_conf_merge_str_value(conf->realm, prev->realm, "LOCALDOMAIN");
   ngx_conf_merge_str_value(conf->keytab, prev->keytab, "/etc/krb5.keytab");
