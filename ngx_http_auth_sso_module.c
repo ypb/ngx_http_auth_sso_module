@@ -35,7 +35,7 @@ static ngx_command_t ngx_http_auth_sso_commands[] = {
   */
 
   { ngx_string("auth_sso"),
-    NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+    NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
     ngx_conf_set_flag_slot,
     NGX_HTTP_LOC_CONF_OFFSET,
     offsetof(ngx_http_auth_sso_loc_conf_t, protect),
@@ -112,6 +112,14 @@ ngx_http_auth_sso_create_loc_conf(ngx_conf_t *cf)
     return NGX_CONF_ERROR;
   }
 
+  conf->protect = NGX_CONF_UNSET;
+
+  /* temporary "debug" */
+  ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+		     "auth_sso: allocated loc_conf_t (0x%X)",
+		     (ngx_uint_t) conf);
+  /* TODO find out if there is way to enable it only in debug mode */
+
   return conf;
 }
 
@@ -121,14 +129,22 @@ ngx_http_auth_sso_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
   ngx_http_auth_sso_loc_conf_t *prev = parent;
   ngx_http_auth_sso_loc_conf_t *conf = child;
 
+  /* "off" by default */
+  ngx_conf_merge_off_value(conf->protect, prev->protect, 0);
+
   ngx_conf_merge_str_value(conf->realm, prev->realm, "LOCALDOMAIN");
   ngx_conf_merge_str_value(conf->keytab, prev->keytab, "/etc/krb5.keytab");
   ngx_conf_merge_str_value(conf->srvcname, prev->srvcname, "HTTP");
 
-  ngx_conf_log_error(NGX_LOG_EMERG, cf, 0, "protect = %i", conf->protect);
-  ngx_conf_log_error(NGX_LOG_EMERG, cf, 0, "realm = %s", conf->realm.data);
-  ngx_conf_log_error(NGX_LOG_EMERG, cf, 0, "keytab = %s", conf->keytab.data);
-  ngx_conf_log_error(NGX_LOG_EMERG, cf, 0, "srvcname = %s", conf->srvcname.data);
+  /* TODO make it only shout in debug */
+  ngx_conf_log_error(NGX_LOG_EMERG, cf, 0, "auth_sso: protect = %i",
+		     conf->protect);
+  ngx_conf_log_error(NGX_LOG_EMERG, cf, 0, "auth_sso: realm@0x%X = %s",
+		     (ngx_uint_t) conf->realm.data, conf->realm.data);
+  ngx_conf_log_error(NGX_LOG_EMERG, cf, 0, "auth_sso: keytab@0x%X = %s",
+		     (ngx_uint_t) conf->keytab.data, conf->keytab.data);
+  ngx_conf_log_error(NGX_LOG_EMERG, cf, 0, "auth_sso: srvcname@0x%X = %s",
+		     (ngx_uint_t) conf->srvcname.data, conf->srvcname.data);
 
   return NGX_CONF_OK;
 }
