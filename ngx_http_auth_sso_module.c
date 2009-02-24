@@ -116,8 +116,7 @@ ngx_http_auth_sso_create_loc_conf(ngx_conf_t *cf)
 
   /* temporary "debug" */
   ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
-		     "auth_sso: allocated loc_conf_t (0x%X)",
-		     (ngx_uint_t) conf);
+		     "auth_sso: allocated loc_conf_t (0x%p)", conf);
   /* TODO find out if there is way to enable it only in debug mode */
 
   return conf;
@@ -139,12 +138,12 @@ ngx_http_auth_sso_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
   /* TODO make it only shout in debug */
   ngx_conf_log_error(NGX_LOG_EMERG, cf, 0, "auth_sso: protect = %i",
 		     conf->protect);
-  ngx_conf_log_error(NGX_LOG_EMERG, cf, 0, "auth_sso: realm@0x%X = %s",
-		     (ngx_uint_t) conf->realm.data, conf->realm.data);
-  ngx_conf_log_error(NGX_LOG_EMERG, cf, 0, "auth_sso: keytab@0x%X = %s",
-		     (ngx_uint_t) conf->keytab.data, conf->keytab.data);
-  ngx_conf_log_error(NGX_LOG_EMERG, cf, 0, "auth_sso: srvcname@0x%X = %s",
-		     (ngx_uint_t) conf->srvcname.data, conf->srvcname.data);
+  ngx_conf_log_error(NGX_LOG_EMERG, cf, 0, "auth_sso: realm@0x%p = %s",
+		     conf->realm.data, conf->realm.data);
+  ngx_conf_log_error(NGX_LOG_EMERG, cf, 0, "auth_sso: keytab@0x%p = %s",
+		     conf->keytab.data, conf->keytab.data);
+  ngx_conf_log_error(NGX_LOG_EMERG, cf, 0, "auth_sso: srvcname@0x%p = %s",
+		     conf->srvcname.data, conf->srvcname.data);
 
   return NGX_CONF_OK;
 }
