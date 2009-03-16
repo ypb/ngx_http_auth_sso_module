@@ -9,8 +9,12 @@
 #include <ngx_core.h>
 #include <ngx_http.h>
 
+/* Module handler */
+static ngx_int_t ngx_http_auth_sso_handler(ngx_http_request_t*);
+
 static void *ngx_http_auth_sso_create_loc_conf(ngx_conf_t*);
 static char *ngx_http_auth_sso_merge_loc_conf(ngx_conf_t*, void*, void*);
+static ngx_int_t ngx_http_auth_sso_init(ngx_conf_t*);
 
 /* Module Configuration Struct(s) (main|srv|loc) */
 
@@ -70,7 +74,7 @@ static ngx_command_t ngx_http_auth_sso_commands[] = {
 
 static ngx_http_module_t ngx_http_auth_sso_module_ctx = {
   NULL, /* preconf */
-  NULL, /* postconf */
+  ngx_http_auth_sso_init, /* postconf */
 
   NULL, /* create main conf (defaults) */
   NULL, /* init main conf (what's in nginx.conf) */
@@ -146,4 +150,55 @@ ngx_http_auth_sso_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
 		     conf->srvcname.data, conf->srvcname.data);
 
   return NGX_CONF_OK;
+}
+
+static ngx_int_t
+ngx_http_auth_sso_init(ngx_conf_t *cf)
+{
+  ngx_http_handler_pt *h;
+  ngx_http_core_main_conf_t *cmcf;
+
+  cmcf = ngx_http_conf_get_module_main_conf(cf, ngx_http_core_module);
+
+  h = ngx_array_push(&cmcf->phases[NGX_HTTP_ACCESS_PHASE].handlers);
+  if (h == NULL) {
+    return NGX_ERROR;
+  }
+
+  *h = ngx_http_auth_sso_handler;
+
+  return NGX_OK;
+}
+
+static ngx_int_t
+ngx_http_auth_sso_negotiate_headers(ngx_http_request_t *r, ngx_str_t *token)
+{
+  r->headers_out.www_authenticate = ngx_list_push(&r->headers_out.headers);
+  if (r->headers_out.www_authenticate == NULL) {
+    return NGX_HTTP_INTERNAL_SERVER_ERROR;
+  }
+
+  r->headers_out.www_authenticate->hash = 1;
+  r->headers_out.www_authenticate->key.len = sizeof("WWW-Authenticate") - 1;
+  r->headers_out.www_authenticate->key.data = (u_char *) "WWW-Authenticate";
+  r->headers_out.www_authenticate->value.len = sizeof("Negotiate") - 1;
+  r->headers_out.www_authenticate->value.data = (u_char *) "Negotiate";
+
+  return NGX_HTTP_UNAUTHORIZED;
+}
+
+static ngx_int_t
+ngx_http_auth_sso_handler(ngx_http_request_t *r)
+{
+  ngx_int_t ret;
+  /*  ngx_http_auth_pam_ctx_t  *ctx; */
+  ngx_http_auth_sso_loc_conf_t *alcf;
+
+  alcf = ngx_http_get_module_loc_conf(r, ngx_http_auth_sso_module);
+
+  if (alcf->protect == 0) {
+    return NGX_DECLINED;
+  }
+
+  return ngx_http_auth_sso_negotiate_headers(r, NULL);
 }

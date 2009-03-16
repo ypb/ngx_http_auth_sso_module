@@ -9,7 +9,7 @@ NCURRENT=$(NAME)-current
 GIT-FILES:=$(shell git ls-files)
 FILES=ChangeLog $(GIT-FILES)
 
-ChangeLog:
+ChangeLog: $(GIT-FILES)
 	git log > "$@"
 
 arch-release:
