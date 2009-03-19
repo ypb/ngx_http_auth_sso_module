@@ -8,6 +8,9 @@
 #include <ngx_config.h>
 #include <ngx_core.h>
 #include <ngx_http.h>
+/*
+#include <ngx_string.h>
+*/
 
 /* Module handler */
 static ngx_int_t ngx_http_auth_sso_handler(ngx_http_request_t*);
@@ -15,6 +18,44 @@ static ngx_int_t ngx_http_auth_sso_handler(ngx_http_request_t*);
 static void *ngx_http_auth_sso_create_loc_conf(ngx_conf_t*);
 static char *ngx_http_auth_sso_merge_loc_conf(ngx_conf_t*, void*, void*);
 static ngx_int_t ngx_http_auth_sso_init(ngx_conf_t*);
+
+/* stolen straight from mod_auth_gss_krb5.c except for ngx_ mods */
+static const char *
+get_gss_error(ngx_pool_t *p, OM_uint32 error_status, char *prefix)
+{
+   OM_uint32 maj_stat, min_stat;
+   OM_uint32 msg_ctx = 0;
+   gss_buffer_desc status_string;
+   char buf[1024];
+   size_t len;
+
+   ngx_snprintf(buf, sizeof(buf), "%s: ", prefix);
+   len = ngx_strlen(buf);
+   do {
+      maj_stat = gss_display_status (&min_stat,
+	                             error_status,
+				     GSS_C_MECH_CODE,
+				     GSS_C_NO_OID,
+				     &msg_ctx,
+				     &status_string);
+      if (sizeof(buf) > len + status_string.length + 1) {
+/*
+         sprintf(buf, "%s:", (char*) status_string.value);
+*/
+         ngx_sprintf(buf+len, "%s:", (char*) status_string.value);
+         len += status_string.length;
+      }
+      gss_release_buffer(&min_stat, &status_string);
+   } while (!GSS_ERROR(maj_stat) && msg_ctx != 0);
+
+   return (ngx_pstrdup(p, buf));
+}
+
+/* Module Req/Con CONTEXTUAL Struct */
+
+typedef struct {
+  ngx_str_t token;
+} ngx_http_auth_sso_ctx_t;
 
 /* Module Configuration Struct(s) (main|srv|loc) */
 
@@ -173,18 +214,401 @@ ngx_http_auth_sso_init(ngx_conf_t *cf)
 static ngx_int_t
 ngx_http_auth_sso_negotiate_headers(ngx_http_request_t *r, ngx_str_t *token)
 {
+  ngx_str_t value = ngx_null_string;
+
+  if (token == NULL) {
+    value.len = sizeof("Negotiate") - 1;
+    value.data = (u_char *) "Negotiate";
+  } else {
+    value.len = sizeof("Negotiate") + token->len;
+    value.data = ngx_pcalloc(r->pool, value.len + 1);
+    if (value.data == NULL) {
+      return NGX_ERROR;
+    }
+    ngx_snprintf(value.data, value.len + 1, "Negotiate %V", token->data);
+  }
+
   r->headers_out.www_authenticate = ngx_list_push(&r->headers_out.headers);
   if (r->headers_out.www_authenticate == NULL) {
-    return NGX_HTTP_INTERNAL_SERVER_ERROR;
+    return NGX_ERROR;
   }
 
   r->headers_out.www_authenticate->hash = 1;
   r->headers_out.www_authenticate->key.len = sizeof("WWW-Authenticate") - 1;
   r->headers_out.www_authenticate->key.data = (u_char *) "WWW-Authenticate";
-  r->headers_out.www_authenticate->value.len = sizeof("Negotiate") - 1;
-  r->headers_out.www_authenticate->value.data = (u_char *) "Negotiate";
 
-  return NGX_HTTP_UNAUTHORIZED;
+  r->headers_out.www_authenticate->value.len = value.len;
+  r->headers_out.www_authenticate->value.data = value.data;
+
+  return NGX_OK;
+}
+
+/* sort of like ngx_http_auth_basic_user ... except we store in ctx_t? */
+ngx_int_t
+ngx_http_auth_sso_token(ngx_http_request_t *r)
+{
+  /* not copying or decoding anything, just checking if token is present
+     and where? NOPE, koz ngx_decode_base64 uses ngx_str_t... so might as well... */
+  ngx_str_t token;
+  ngx_str_t decoded;
+  ngx_http_auth_sso_ctx_t *ctx;
+
+  if (r->headers_in.authorization == NULL) {
+    return NGX_DECLINED;
+  }
+
+  token = r->headers_in.authorization->value;
+
+  if (token.len < sizeof("Negotiate ") - 1
+      || ngx_strncasecmp(token.data, (u_char *) "Negotiate ",
+			 sizeof("Negotiate ") - 1) != 0) {
+    return NGX_DECLINED;
+  }
+
+  token.len -= sizeof("Negotiate ") - 1;
+  token.data += sizeof("Negotiate ") - 1;
+
+  while (token.len && token.data[0] == ' ') {
+    token.len--;
+    token.data++;
+  }
+
+  if (token.len == 0) {
+    return NGX_DECLINED;
+  }
+
+  decoded.len = ngx_base64_decoded_length(token.len);
+  decoded.data = ngx_pnalloc(r->pool, decoded.len + 1);
+  if (decoded.data == NULL) {
+    return NGX_ERROR;
+  }
+
+  if (ngx_decode_base64(&decoded, &token) != NGX_OK) {
+    return NGX_DECLINED;
+  }
+
+  decoded.data[decoded.len] = '\0'; /* hmmm */
+
+  ctx = ngx_palloc(r->pool, sizeof(ngx_http_auth_sso_ctx_t));
+  if (ctx == NULL) {
+    return NGX_ERROR;
+  }
+
+  ngx_http_set_ctx(r, ctx, ngx_http_auth_sso_module);
+
+  ctx->token.len = decoded.len;
+  ctx->token.data = decoded.data;
+  /* off by one? hmmm... */
+
+  return NGX_OK;
+}
+
+ngx_int_t
+ngx_http_auth_sso_auth_user_gss(ngx_http_request_t *r,
+				ngx_http_auth_sso_loc_conf_t *alcf)
+{
+  static unsigned char ntlmProtocol [] = {'N', 'T', 'L', 'M', 'S', 'S', 'P', 0};
+
+  /*
+    nginx stuff
+  */
+  ngx_http_auth_sso_ctx_t *ctx;
+  ngx_str_t host_name;
+  ngx_int_t ret = NGX_DECLINED;
+  int rc;
+  int spnego_flag = 0;
+  char *p;
+  /*
+    kerberos stuff
+  */
+  krb5_context krb_ctx = NULL;
+  u_char *ktname = NULL;
+  /* ngx_str_t kerberosToken; ? */
+  unsigned char *kerberosToken = NULL;
+  size_t kerberosTokenLength = 0;
+  /* this izgotten from de-SPNEGGING original token...
+     and put into gss_accept_sec_context...
+     silly...
+   */
+  ngx_str_t spnegoToken = ngx_null_string;
+  /* unsigned char *spnegoToken = NULL ;
+     size_t spnegoTokenLength = 0; */
+  /*
+    gssapi stuff
+  */
+  OM_uint32 major_status, minor_status, minor_status2;
+  gss_buffer_desc service = GSS_C_EMPTY_BUFFER;
+  gss_name_t my_gss_name = GSS_C_NO_NAME;
+  gss_cred_id_t my_gss_creds = GSS_C_NO_CREDENTIAL;
+  gss_buffer_desc input_token = GSS_C_EMPTY_BUFFER;
+  gss_ctx_id_t gss_context = GSS_C_NO_CONTEXT;
+  gss_name_t client_name = GSS_C_NO_NAME;
+  gss_buffer_desc output_token = GSS_C_EMPTY_BUFFER;
+  OM_uint32 ret_flags = 0;
+  gss_cred_id_t delegated_cred = GSS_C_NO_CREDENTIAL;
+
+  /* first, see if there is a point in runing */
+  ctx = ngx_http_get_module_ctx(r, ngx_http_auth_sso_module);
+  /* this really shouldn't 'eppen */
+  if (!ctx || ctx->token.len == 0) {
+    return ret;
+  }
+  /* on with the copy cat show */
+
+  krb5_init_context(&krb_ctx);
+
+  ktname = ngx_pcalloc(r->pool, sizeof("KRB5_KTNAME=")+alcf->keytab.len);
+  if (ktname == NULL) {
+    ret = NGX_ERROR;
+    goto end;
+  }
+  ngx_snprintf(ktname, sizeof("KRB5_KTNAME=")+alcf->keytab.len,
+	       "KRB5_KTNAME=%V", alcf->keytab);
+  putenv(ktname);
+
+  ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+		 "Use keytab %V", alcf->keytab);
+
+  /* TODECIDE: wherefrom use the hostname value for the service name? */
+  host_name = r->headers_in.host->value;
+  /* for now using the name client thinks... */
+  service.length = alcf->srvcname.len + host_name.len + 2;
+  /* @ vel / */
+  service.value = ngx_palloc(r->pool, service.length);
+  if (service.value == NULL) {
+    ret = NGX_ERROR;
+    goto end;
+  }
+  ngx_snprintf(service.value, service.length, "%V@%V",
+	       alcf->srvcname, host_name);
+
+  ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+		 "Use service principal %V/%V", alcf->srvcname, host_name);
+
+  major_status = gss_import_name(&minor_status, &service,
+                                 gss_nt_service_name, &my_gss_name);
+  if (GSS_ERROR(major_status)) {
+    ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+		  "%s Used service principal: %s",
+		  get_gss_error(r->pool, minor_status,
+				"gss_import_name() failed for service principal"),
+		  (unsigned char *)service.value);
+    ret = NGX_ERROR;
+    goto end;
+  }
+
+  major_status = gss_acquire_cred(&minor_status,
+				  my_gss_name,
+				  GSS_C_INDEFINITE,
+				  GSS_C_NO_OID_SET,
+				  GSS_C_ACCEPT,
+				  &my_gss_creds,
+				  NULL,
+				  NULL);
+  if (GSS_ERROR(major_status)) {
+    ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+		  "%s Used service principal: %s",
+		  get_gss_error(r->pool, minor_status,
+				"gss_acquire_cred() failed"),
+		  (unsigned char *)service.value);
+    ret = NGX_ERROR;
+    goto end;
+  }
+
+  /* the MEAT? */
+  input_token.length = ctx->token.len + 1;
+  input_token.value = (void *) ctx->token.data;
+  /* Should check first if SPNEGO token */
+  /* but it looks like mit-kerberos version > 1.4.4 DOES include GSSAPI
+     code that supports SPNEGO... ("donated by SUN")... */
+  if ( (rc = parseNegTokenInit (input_token.value,
+			       input_token.length,
+			       &kerberosToken,
+			       &kerberosTokenLength)) != 0 ) {
+
+    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+		   "parseNegTokenInit failed with rc=%d", rc);
+    /* 
+       Error 1xy -> assume GSSAPI token and continue 
+    */
+    if ( rc < 100 || rc > 199 ) {
+      ret = NGX_DECLINED;
+      goto end;
+      /* TOTALLY CLUELESS */
+    }
+    /* feeble NTLM... */
+    if ( (input_token.length >= sizeof ntlmProtocol + 1) &&
+	 (!ngx_memcmp(input_token.value, ntlmProtocol, sizeof ntlmProtocol)) ) {
+      ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+		     "received type %d NTLM token",
+		     (int) *((unsigned char *)input_token.value + sizeof ntlmProtocol)); /* jeez */
+      ret = NGX_DECLINED;
+      goto end;
+    }
+    spnego_flag = 0;
+  } else {
+    input_token.length = kerberosTokenLength;
+    input_token.value = ngx_pcalloc(r->pool, input_token.length);
+    if (input_token.value == NULL) {
+      ret = NGX_ERROR;
+      goto end;
+    }
+    ngx_memcpy(input_token.value, kerberosToken, input_token.length);
+    spnego_flag = 1;
+  }
+
+  major_status = gss_accept_sec_context(&minor_status,
+					&gss_context,
+					my_gss_creds,
+					&input_token,
+					GSS_C_NO_CHANNEL_BINDINGS,
+					&client_name,
+					NULL,
+					&output_token,
+					&ret_flags,
+					NULL,
+					&delegated_cred);
+
+  if (output_token.length) {
+    ngx_str_t token = ngx_null_string;
+
+    if (spnego_flag) {
+      if ( (rc = makeNegTokenTarg (output_token.value,
+				  output_token.length,
+				  &spnegoToken.data,
+				  &spnegoToken.len)) != 0 ) {
+	ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+		       "makeNegTokenTarg failed with rc=%d",rc);
+	ret = NGX_DECLINED;
+	goto end;
+      }
+    } else {
+      spnegoToken.data = (u_char *) output_token.value;
+      spnegoToken.len = output_token.length - 1;
+    }
+    /* XXX use ap_uuencode() */
+    token.len = ngx_base64_encode_length(spnegoToken.len)
+    token.data = ngx_pcalloc(r->pool, token.len + 1);
+    if (token.data == NULL) {
+      ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+		    "Not enough memory");
+      ret = NGX_ERROR;
+      /* ??? */
+      gss_release_buffer(&minor_status2, &output_token);
+      goto end;
+    }
+    if (ngx_encode_base64(&token, &spnegoToken) != NGX_OK) {
+      ret = NGX_DECLINED; /* or NGX_ERROR ? */
+      goto end;
+    }
+
+    /* ??? */
+    gss_release_buffer(&minor_status2, &output_token);
+
+    /* and now here we had to rework ngx_http_auth_sso_negotiate_headers... */
+
+    if ( (ret = ngx_http_auth_sso_negotiate_headers(r, &token)) == NGX_ERROR ) {
+      goto end;
+    }
+    /*    ap_table_set(r->err_headers_out, "WWW-Authenticate",
+	  ap_pstrcat(r->pool, "Negotiate ", token, NULL)); */
+  }
+
+  /* theesee two ifs could/SHOULD? as well go before the block above?!?
+     headers shouldn't be set if we DECLINE, but i guess there won't be output_token anyway... */
+  if (GSS_ERROR(major_status)) {
+    ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+		   "%s Used service principal: %s",
+		   get_gss_error(r->pool, minor_status,
+				 "gss_accept_sec_context() failed"),
+		   (unsigned char *)service.value);
+    ret = NGX_DECLINED;
+    goto end;
+  }
+
+  if (major_status & GSS_S_CONTINUE_NEEDED) {
+    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+		   "only one authentication iteration allowed");
+    ret = NGX_DECLINED;
+    goto end;
+  }
+
+  /* INFO */
+  if ( !(ret_flags & GSS_C_REPLAY_FLAG || ret_flags & GSS_C_SEQUENCE_FLAG) ){
+    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+		   "GSSAPI Warning: no replay protection !");
+  }
+  if ( !(ret_flags & GSS_C_SEQUENCE_FLAG) ){
+    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+		   "GSSAPI Warning: no sequence protection !");
+  }
+
+  /* getting user name at the other end of the request */
+  major_status = gss_display_name(&minor_status,
+				  client_name,
+				  &output_token,
+				  NULL);
+  gss_release_name(&minor_status, &client_name);
+
+  /* hmm... if he is going to ERROR out now we should do it before setting headers... */
+  if (GSS_ERROR(major_status)) {
+    ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+		  "%s", get_gss_error(r->pool, minor_status, 
+		                      "gss_display_name() failed"));
+    ret = NGX_ERROR;
+    goto end;
+  }
+
+  if (output_token.length) {
+    ngx_str_t user = { output_token.length - 1,
+		       (u_char *) output_token.value };
+
+    r->headers_in.user.data = ngx_pstrdup(r->pool, &user);
+    /* NULL?!? */
+    r->headers_in.user.len = user.len;
+
+    p = ngx_strchr(r->headers_in.user.data, '@');
+    if (p != NULL) {
+      if (ngx_strcmp(p+1, alcf->realm.data) == 0) {
+	*p = '\0';
+	r->headers_in.user.len = ngx_strlen(r->headers_in.user.data);
+      }
+    }
+  }
+
+  gss_release_buffer(&minor_status, &output_token);
+
+  /* saving creds... LATER, for now debug msg... */
+  if (delegated_cred != GSS_C_NO_CREDENTIAL) {
+    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+		   "Had delegated_cred to save.");
+  }
+
+  ret = NGX_OK;
+  /* goto end; */
+
+  /* well, alright, the end, my friend */
+end:
+  if (delegated_cred)
+     gss_release_cred(&minor_status, &delegated_cred);
+
+  if (output_token.length) 
+     gss_release_buffer(&minor_status, &output_token);
+
+  if (client_name != GSS_C_NO_NAME)
+     gss_release_name(&minor_status, &client_name);
+
+  if (gss_context != GSS_C_NO_CONTEXT)
+     gss_delete_sec_context(&minor_status, &gss_context, GSS_C_NO_BUFFER);
+
+  krb5_free_context(krb_ctx);
+  if (my_gss_name != GSS_C_NO_NAME)
+     gss_release_name(&minor_status, &my_gss_name);
+
+  if (my_gss_creds != GSS_C_NO_CREDENTIAL)
+     gss_release_cred(&minor_status, &my_gss_creds);
+
+  return ret;
 }
 
 static ngx_int_t
@@ -200,5 +624,25 @@ ngx_http_auth_sso_handler(ngx_http_request_t *r)
     return NGX_DECLINED;
   }
 
-  return ngx_http_auth_sso_negotiate_headers(r, NULL);
+  ret = ngx_http_auth_sso_token(r);
+
+  if (ret == NGX_OK) {
+    /* ok... looks like client sent some Negotiate'ing authorization header... */
+    ret = ngx_http_auth_sso_auth_user_gss(r, alcf);
+  }
+
+  if (ret == NGX_DECLINED) {
+    ret = ngx_http_auth_sso_negotiate_headers(r, NULL);
+    if (ret == NGX_ERROR) {
+      return NGX_HTTP_INTERNAL_SERVER_ERROR;
+    }
+    return NGX_HTTP_UNAUTHORIZED
+  }
+
+  if (ret == NGX_ERROR) {
+    return NGX_HTTP_INTERNAL_SERVER_ERROR;
+  }
+
+  /* else NGX_OK */
+  return ret;
 }
