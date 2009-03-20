@@ -12,6 +12,20 @@
 #include <ngx_string.h>
 */
 
+#include <gssapi/gssapi.h>
+
+#include <krb5.h>
+
+/* #include <spnegohelp.h> */
+int parseNegTokenInit (const unsigned char *  negTokenInit,
+                       size_t                 negTokenInitLength,
+                       const unsigned char ** kerberosToken,
+                       size_t *               kerberosTokenLength);
+int makeNegTokenTarg (const unsigned char *  kerberosToken,
+                      size_t                 kerberosTokenLength,
+                      const unsigned char ** negTokenTarg,
+                      size_t *               negTokenTargLength);
+
 /* Module handler */
 static ngx_int_t ngx_http_auth_sso_handler(ngx_http_request_t*);
 
@@ -26,8 +40,9 @@ get_gss_error(ngx_pool_t *p, OM_uint32 error_status, char *prefix)
    OM_uint32 maj_stat, min_stat;
    OM_uint32 msg_ctx = 0;
    gss_buffer_desc status_string;
-   char buf[1024];
+   u_char buf[1024];
    size_t len;
+   ngx_str_t str;
 
    ngx_snprintf(buf, sizeof(buf), "%s: ", prefix);
    len = ngx_strlen(buf);
@@ -48,7 +63,9 @@ get_gss_error(ngx_pool_t *p, OM_uint32 error_status, char *prefix)
       gss_release_buffer(&min_stat, &status_string);
    } while (!GSS_ERROR(maj_stat) && msg_ctx != 0);
 
-   return (ngx_pstrdup(p, buf));
+   str.len = len;
+   str.data = buf;
+   return (char *)(ngx_pstrdup(p, &str));
 }
 
 /* Module Req/Con CONTEXTUAL Struct */
@@ -364,7 +381,7 @@ ngx_http_auth_sso_auth_user_gss(ngx_http_request_t *r,
   }
   ngx_snprintf(ktname, sizeof("KRB5_KTNAME=")+alcf->keytab.len,
 	       "KRB5_KTNAME=%V", alcf->keytab);
-  putenv(ktname);
+  putenv((char *) ktname);
 
   ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
 		 "Use keytab %V", alcf->keytab);
@@ -386,7 +403,7 @@ ngx_http_auth_sso_auth_user_gss(ngx_http_request_t *r,
 		 "Use service principal %V/%V", alcf->srvcname, host_name);
 
   major_status = gss_import_name(&minor_status, &service,
-                                 gss_nt_service_name, &my_gss_name);
+                                 GSS_C_NT_HOSTBASED_SERVICE, &my_gss_name);
   if (GSS_ERROR(major_status)) {
     ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
 		  "%s Used service principal: %s",
@@ -423,7 +440,7 @@ ngx_http_auth_sso_auth_user_gss(ngx_http_request_t *r,
      code that supports SPNEGO... ("donated by SUN")... */
   if ( (rc = parseNegTokenInit (input_token.value,
 			       input_token.length,
-			       &kerberosToken,
+			       (const unsigned char **) &kerberosToken,
 			       &kerberosTokenLength)) != 0 ) {
 
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
@@ -475,7 +492,7 @@ ngx_http_auth_sso_auth_user_gss(ngx_http_request_t *r,
     if (spnego_flag) {
       if ( (rc = makeNegTokenTarg (output_token.value,
 				  output_token.length,
-				  &spnegoToken.data,
+				  (const unsigned char **) &spnegoToken.data,
 				  &spnegoToken.len)) != 0 ) {
 	ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
 		       "makeNegTokenTarg failed with rc=%d",rc);
@@ -487,7 +504,7 @@ ngx_http_auth_sso_auth_user_gss(ngx_http_request_t *r,
       spnegoToken.len = output_token.length - 1;
     }
     /* XXX use ap_uuencode() */
-    token.len = ngx_base64_encode_length(spnegoToken.len)
+    token.len = ngx_base64_encoded_length(spnegoToken.len);
     token.data = ngx_pcalloc(r->pool, token.len + 1);
     if (token.data == NULL) {
       ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
@@ -497,10 +514,7 @@ ngx_http_auth_sso_auth_user_gss(ngx_http_request_t *r,
       gss_release_buffer(&minor_status2, &output_token);
       goto end;
     }
-    if (ngx_encode_base64(&token, &spnegoToken) != NGX_OK) {
-      ret = NGX_DECLINED; /* or NGX_ERROR ? */
-      goto end;
-    }
+    ngx_encode_base64(&token, &spnegoToken); /* did it work (void) */
 
     /* ??? */
     gss_release_buffer(&minor_status2, &output_token);
@@ -636,7 +650,7 @@ ngx_http_auth_sso_handler(ngx_http_request_t *r)
     if (ret == NGX_ERROR) {
       return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
-    return NGX_HTTP_UNAUTHORIZED
+    return NGX_HTTP_UNAUTHORIZED;
   }
 
   if (ret == NGX_ERROR) {
