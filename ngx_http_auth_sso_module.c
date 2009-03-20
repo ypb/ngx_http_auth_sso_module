@@ -373,6 +373,8 @@ ngx_http_auth_sso_auth_user_gss(ngx_http_request_t *r,
     return ret;
   }
   /* on with the copy cat show */
+  ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+		 "GSSAPI authorizing");
 
   krb5_init_context(&krb_ctx);
 
