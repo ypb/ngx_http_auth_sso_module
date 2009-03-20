@@ -316,6 +316,8 @@ ngx_http_auth_sso_token(ngx_http_request_t *r)
   ctx->token.len = decoded.len;
   ctx->token.data = decoded.data;
   /* off by one? hmmm... */
+  ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+		 "Token decoded");
 
   return NGX_OK;
 }
