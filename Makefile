@@ -1,6 +1,6 @@
 
 NAME=ngx_http_auth_sso_module
-VERSION=0.0.1
+VERSION=0.0.2
 
 NPKG=$(NAME)-$(VERSION)
 NHEAD=$(NAME)-HEAD
