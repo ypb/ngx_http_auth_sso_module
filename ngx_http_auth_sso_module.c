@@ -606,6 +606,8 @@ ngx_http_auth_sso_auth_user_gss(ngx_http_request_t *r,
 	r->headers_in.user.len = ngx_strlen(r->headers_in.user.data);
       }
     }
+    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+		   "user is %V", &r->headers_in.user);
   }
 
   gss_release_buffer(&minor_status, &output_token);
@@ -670,6 +672,7 @@ ngx_http_auth_sso_handler(ngx_http_request_t *r)
     ctx->ret = NGX_HTTP_UNAUTHORIZED;
     ngx_http_set_ctx(r, ctx, ngx_http_auth_sso_module);
   }
+  /* nope... local fs req creates new ctx... useless... */
 
   ngx_log_debug3(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
 		 "SSO auth handling IN: token.len=%d, head=%d, ret=%d",
@@ -677,6 +680,8 @@ ngx_http_auth_sso_handler(ngx_http_request_t *r)
 
   if (ctx->token.len && ctx->head)
     return ctx->ret;
+  if (r->headers_in.user.data != NULL)
+    return NGX_OK;
 
   ret = ngx_http_auth_sso_token(r, ctx);
 
