@@ -34,8 +34,10 @@ static char *ngx_http_auth_sso_merge_loc_conf(ngx_conf_t*, void*, void*);
 static ngx_int_t ngx_http_auth_sso_init(ngx_conf_t*);
 
 /* stolen straight from mod_auth_gss_krb5.c except for ngx_ mods */
-static const char *
-get_gss_error(ngx_pool_t *p, OM_uint32 error_status, char *prefix)
+const char *
+get_gss_error(ngx_pool_t *p,
+	      OM_uint32 error_status,
+	      char *prefix)
 {
    OM_uint32 maj_stat, min_stat;
    OM_uint32 msg_ctx = 0;
@@ -58,21 +60,24 @@ get_gss_error(ngx_pool_t *p, OM_uint32 error_status, char *prefix)
 /*
          sprintf(buf, "%s:", (char*) status_string.value);
 */
-         ngx_sprintf((u_char *) buf+len, "%s:", (char*) status_string.value);
+         ngx_sprintf((u_char *) buf+len, "%s:%Z", (char*) status_string.value);
          len += ( status_string.length + 1);
       }
       gss_release_buffer(&min_stat, &status_string);
    } while (!GSS_ERROR(maj_stat) && msg_ctx != 0);
 
-   str.len = len;
+   /* "include" '\0' */
+   str.len = len + 1;
    str.data = (u_char *) buf;
    return (char *)(ngx_pstrdup(p, &str));
 }
 
-/* Module Req/Con CONTEXTUAL Struct */
+/* Module per Req/Con CONTEXTUAL Struct */
 
 typedef struct {
-  ngx_str_t token;
+  ngx_str_t token; /* decoded Negotiate token */
+  ngx_int_t head; /* non-zero flag if headers set */
+  ngx_int_t ret; /* current return code */
 } ngx_http_auth_sso_ctx_t;
 
 /* Module Configuration Struct(s) (main|srv|loc) */
@@ -186,7 +191,9 @@ ngx_http_auth_sso_create_loc_conf(ngx_conf_t *cf)
 }
 
 static char *
-ngx_http_auth_sso_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
+ngx_http_auth_sso_merge_loc_conf(ngx_conf_t *cf,
+				 void *parent,
+				 void *child)
 {
   ngx_http_auth_sso_loc_conf_t *prev = parent;
   ngx_http_auth_sso_loc_conf_t *conf = child;
@@ -230,7 +237,9 @@ ngx_http_auth_sso_init(ngx_conf_t *cf)
 }
 
 static ngx_int_t
-ngx_http_auth_sso_negotiate_headers(ngx_http_request_t *r, ngx_str_t *token)
+ngx_http_auth_sso_negotiate_headers(ngx_http_request_t *r,
+				    ngx_http_auth_sso_ctx_t *ctx,
+				    ngx_str_t *token)
 {
   ngx_str_t value = ngx_null_string;
 
@@ -258,22 +267,26 @@ ngx_http_auth_sso_negotiate_headers(ngx_http_request_t *r, ngx_str_t *token)
   r->headers_out.www_authenticate->value.len = value.len;
   r->headers_out.www_authenticate->value.data = value.data;
 
+  ctx->head = 1;
+
   return NGX_OK;
 }
 
 /* sort of like ngx_http_auth_basic_user ... except we store in ctx_t? */
 ngx_int_t
-ngx_http_auth_sso_token(ngx_http_request_t *r)
+ngx_http_auth_sso_token(ngx_http_request_t *r,
+			ngx_http_auth_sso_ctx_t *ctx)
 {
   /* not copying or decoding anything, just checking if token is present
      and where? NOPE, koz ngx_decode_base64 uses ngx_str_t... so might as well... */
   ngx_str_t token;
   ngx_str_t decoded;
-  ngx_http_auth_sso_ctx_t *ctx;
 
   if (r->headers_in.authorization == NULL) {
     return NGX_DECLINED;
   }
+  /* but don't decode second time? */
+  if (ctx->token.len) return NGX_OK;
 
   token = r->headers_in.authorization->value;
 
@@ -307,12 +320,12 @@ ngx_http_auth_sso_token(ngx_http_request_t *r)
 
   decoded.data[decoded.len] = '\0'; /* hmmm */
 
-  ctx = ngx_palloc(r->pool, sizeof(ngx_http_auth_sso_ctx_t));
-  if (ctx == NULL) {
-    return NGX_ERROR;
-  }
+/*   ctx = ngx_palloc(r->pool, sizeof(ngx_http_auth_sso_ctx_t)); */
+/*   if (ctx == NULL) { */
+/*     return NGX_ERROR; */
+/*   } */
 
-  ngx_http_set_ctx(r, ctx, ngx_http_auth_sso_module);
+/*   ngx_http_set_ctx(r, ctx, ngx_http_auth_sso_module); */
 
   ctx->token.len = decoded.len;
   ctx->token.data = decoded.data;
@@ -325,6 +338,7 @@ ngx_http_auth_sso_token(ngx_http_request_t *r)
 
 ngx_int_t
 ngx_http_auth_sso_auth_user_gss(ngx_http_request_t *r,
+				ngx_http_auth_sso_ctx_t *ctx,
 				ngx_http_auth_sso_loc_conf_t *alcf)
 {
   static unsigned char ntlmProtocol [] = {'N', 'T', 'L', 'M', 'S', 'S', 'P', 0};
@@ -332,7 +346,6 @@ ngx_http_auth_sso_auth_user_gss(ngx_http_request_t *r,
   /*
     nginx stuff
   */
-  ngx_http_auth_sso_ctx_t *ctx;
   ngx_str_t host_name;
   ngx_int_t ret = NGX_DECLINED;
   int rc;
@@ -368,7 +381,7 @@ ngx_http_auth_sso_auth_user_gss(ngx_http_request_t *r,
   gss_cred_id_t delegated_cred = GSS_C_NO_CREDENTIAL;
 
   /* first, see if there is a point in runing */
-  ctx = ngx_http_get_module_ctx(r, ngx_http_auth_sso_module);
+/*   ctx = ngx_http_get_module_ctx(r, ngx_http_auth_sso_module); */
   /* this really shouldn't 'eppen */
   if (!ctx || ctx->token.len == 0) {
     return ret;
@@ -385,7 +398,7 @@ ngx_http_auth_sso_auth_user_gss(ngx_http_request_t *r,
     goto end;
   }
   ngx_snprintf((u_char *) ktname, sizeof("KRB5_KTNAME=")+alcf->keytab.len,
-	       "KRB5_KTNAME=%V", &alcf->keytab);
+	       "KRB5_KTNAME=%V%Z", &alcf->keytab);
   putenv(ktname);
 
   ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
@@ -401,7 +414,7 @@ ngx_http_auth_sso_auth_user_gss(ngx_http_request_t *r,
     ret = NGX_ERROR;
     goto end;
   }
-  ngx_snprintf(service.value, service.length, "%V@%V",
+  ngx_snprintf(service.value, service.length, "%V@%V%Z",
 	       &alcf->srvcname, &host_name);
 
   ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
@@ -634,7 +647,7 @@ static ngx_int_t
 ngx_http_auth_sso_handler(ngx_http_request_t *r)
 {
   ngx_int_t ret;
-  /*  ngx_http_auth_pam_ctx_t  *ctx; */
+  ngx_http_auth_sso_ctx_t *ctx;
   ngx_http_auth_sso_loc_conf_t *alcf;
 
   alcf = ngx_http_get_module_loc_conf(r, ngx_http_auth_sso_module);
@@ -643,25 +656,43 @@ ngx_http_auth_sso_handler(ngx_http_request_t *r)
     return NGX_DECLINED;
   }
 
-  ret = ngx_http_auth_sso_token(r);
+  /* looks like we need ctx_t "frst" after all, there is URI level
+     access phase and filesystem level access phase... */
+  ctx = ngx_http_get_module_ctx(r, ngx_http_auth_sso_module);
+  if (ctx == NULL) {
+    ctx = ngx_palloc(r->pool, sizeof(ngx_http_auth_sso_ctx_t));
+    if (ctx == NULL) {
+      return NGX_HTTP_INTERNAL_SERVER_ERROR;
+    }
+    ctx->token = ngx_null_string;
+    ctx->head = 0;
+    ctx->ret = NGX_HTTP_UNAUTHORIZED;
+    ngx_http_set_ctx(r, ctx, ngx_http_auth_sso_module);
+  }
+
+  if (ctx->token.len && ctx->head)
+    return ctx->ret;
+
+  ret = ngx_http_auth_sso_token(r, ctx);
 
   if (ret == NGX_OK) {
     /* ok... looks like client sent some Negotiate'ing authorization header... */
-    ret = ngx_http_auth_sso_auth_user_gss(r, alcf);
+    ret = ngx_http_auth_sso_auth_user_gss(r, ctx, alcf);
   }
 
   if (ret == NGX_DECLINED) {
-    ret = ngx_http_auth_sso_negotiate_headers(r, NULL);
+    /* TODEBATE skip if (ctx->head)... */
+    ret = ngx_http_auth_sso_negotiate_headers(r, ctx, NULL);
     if (ret == NGX_ERROR) {
-      return NGX_HTTP_INTERNAL_SERVER_ERROR;
+      return (ctx->ret = NGX_HTTP_INTERNAL_SERVER_ERROR);
     }
-    return NGX_HTTP_UNAUTHORIZED;
+    return (ctx->ret = NGX_HTTP_UNAUTHORIZED);
   }
 
   if (ret == NGX_ERROR) {
-    return NGX_HTTP_INTERNAL_SERVER_ERROR;
+    return (ctx->ret = NGX_HTTP_INTERNAL_SERVER_ERROR);
   }
 
   /* else NGX_OK */
-  return ret;
+  return (ctx->ret = ret);
 }
