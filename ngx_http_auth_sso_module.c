@@ -40,11 +40,11 @@ get_gss_error(ngx_pool_t *p, OM_uint32 error_status, char *prefix)
    OM_uint32 maj_stat, min_stat;
    OM_uint32 msg_ctx = 0;
    gss_buffer_desc status_string;
-   u_char buf[1024];
+   char buf[1024];
    size_t len;
    ngx_str_t str;
 
-   ngx_snprintf(buf, sizeof(buf), "%s: ", prefix);
+   ngx_snprintf((u_char *) buf, sizeof(buf), "%s: ", prefix);
    len = ngx_strlen(buf);
    do {
       maj_stat = gss_display_status (&min_stat,
@@ -57,14 +57,14 @@ get_gss_error(ngx_pool_t *p, OM_uint32 error_status, char *prefix)
 /*
          sprintf(buf, "%s:", (char*) status_string.value);
 */
-         ngx_sprintf(buf+len, "%s:", (char*) status_string.value);
+         ngx_sprintf((u_char *) buf+len, "%s:", (char*) status_string.value);
          len += status_string.length;
       }
       gss_release_buffer(&min_stat, &status_string);
    } while (!GSS_ERROR(maj_stat) && msg_ctx != 0);
 
    str.len = len;
-   str.data = buf;
+   str.data = (u_char *) buf;
    return (char *)(ngx_pstrdup(p, &str));
 }
 
@@ -242,7 +242,7 @@ ngx_http_auth_sso_negotiate_headers(ngx_http_request_t *r, ngx_str_t *token)
     if (value.data == NULL) {
       return NGX_ERROR;
     }
-    ngx_snprintf(value.data, value.len + 1, "Negotiate %V", token->data);
+    ngx_snprintf(value.data, value.len + 1, "Negotiate %V", token);
   }
 
   r->headers_out.www_authenticate = ngx_list_push(&r->headers_out.headers);
@@ -341,7 +341,7 @@ ngx_http_auth_sso_auth_user_gss(ngx_http_request_t *r,
     kerberos stuff
   */
   krb5_context krb_ctx = NULL;
-  u_char *ktname = NULL;
+  char *ktname = NULL;
   /* ngx_str_t kerberosToken; ? */
   unsigned char *kerberosToken = NULL;
   size_t kerberosTokenLength = 0;
@@ -378,17 +378,17 @@ ngx_http_auth_sso_auth_user_gss(ngx_http_request_t *r,
 
   krb5_init_context(&krb_ctx);
 
-  ktname = ngx_pcalloc(r->pool, sizeof("KRB5_KTNAME=")+alcf->keytab.len);
+  ktname = (char *) ngx_pcalloc(r->pool, sizeof("KRB5_KTNAME=")+alcf->keytab.len);
   if (ktname == NULL) {
     ret = NGX_ERROR;
     goto end;
   }
-  ngx_snprintf(ktname, sizeof("KRB5_KTNAME=")+alcf->keytab.len,
-	       "KRB5_KTNAME=%V", alcf->keytab);
-  putenv((char *) ktname);
+  ngx_snprintf((u_char *) ktname, sizeof("KRB5_KTNAME=")+alcf->keytab.len,
+	       "KRB5_KTNAME=%V", &alcf->keytab);
+  putenv(ktname);
 
   ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-		 "Use keytab %V", alcf->keytab);
+		 "Use keytab %V", &alcf->keytab);
 
   /* TODECIDE: wherefrom use the hostname value for the service name? */
   host_name = r->headers_in.host->value;
@@ -401,10 +401,10 @@ ngx_http_auth_sso_auth_user_gss(ngx_http_request_t *r,
     goto end;
   }
   ngx_snprintf(service.value, service.length, "%V@%V",
-	       alcf->srvcname, host_name);
+	       &alcf->srvcname, &host_name);
 
   ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-		 "Use service principal %V/%V", alcf->srvcname, host_name);
+		 "Use service principal %V/%V", &alcf->srvcname, &host_name);
 
   major_status = gss_import_name(&minor_status, &service,
                                  GSS_C_NT_HOSTBASED_SERVICE, &my_gss_name);
@@ -598,7 +598,7 @@ ngx_http_auth_sso_auth_user_gss(ngx_http_request_t *r,
 
   /* saving creds... LATER, for now debug msg... */
   if (delegated_cred != GSS_C_NO_CREDENTIAL) {
-    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
 		   "Had delegated_cred to save.");
   }
 
