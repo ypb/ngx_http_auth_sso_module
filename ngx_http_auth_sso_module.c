@@ -539,7 +539,7 @@ ngx_http_auth_sso_auth_user_gss(ngx_http_request_t *r,
 
     /* and now here we had to rework ngx_http_auth_sso_negotiate_headers... */
 
-    if ( (ret = ngx_http_auth_sso_negotiate_headers(r, &token)) == NGX_ERROR ) {
+    if ( (ret = ngx_http_auth_sso_negotiate_headers(r, ctx, &token)) == NGX_ERROR ) {
       goto end;
     }
     /*    ap_table_set(r->err_headers_out, "WWW-Authenticate",
@@ -664,11 +664,16 @@ ngx_http_auth_sso_handler(ngx_http_request_t *r)
     if (ctx == NULL) {
       return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
-    ctx->token = ngx_null_string;
+    ctx->token.len = 0;
+    ctx->token.data = NULL;
     ctx->head = 0;
     ctx->ret = NGX_HTTP_UNAUTHORIZED;
     ngx_http_set_ctx(r, ctx, ngx_http_auth_sso_module);
   }
+
+  ngx_log_debug3(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+		 "SSO auth handling IN: token.len=%d, head=%d, ret=%d",
+		 ctx->token.len, ctx->head, ctx->ret);
 
   if (ctx->token.len && ctx->head)
     return ctx->ret;
@@ -694,5 +699,8 @@ ngx_http_auth_sso_handler(ngx_http_request_t *r)
   }
 
   /* else NGX_OK */
+  ngx_log_debug3(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+		 "SSO auth handling OUT: token.len=%d, head=%d, ret=%d",
+		 ctx->token.len, ctx->head, ret);
   return (ctx->ret = ret);
 }
