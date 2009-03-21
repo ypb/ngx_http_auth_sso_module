@@ -44,7 +44,8 @@ get_gss_error(ngx_pool_t *p, OM_uint32 error_status, char *prefix)
    size_t len;
    ngx_str_t str;
 
-   ngx_snprintf((u_char *) buf, sizeof(buf), "%s: ", prefix);
+   /* ngx_fubarprintf... what a hack... %Z inserts '\0' */
+   ngx_snprintf((u_char *) buf, sizeof(buf), "%s: %Z", prefix);
    len = ngx_strlen(buf);
    do {
       maj_stat = gss_display_status (&min_stat,
@@ -58,7 +59,7 @@ get_gss_error(ngx_pool_t *p, OM_uint32 error_status, char *prefix)
          sprintf(buf, "%s:", (char*) status_string.value);
 */
          ngx_sprintf((u_char *) buf+len, "%s:", (char*) status_string.value);
-         len += status_string.length;
+         len += ( status_string.length + 1);
       }
       gss_release_buffer(&min_stat, &status_string);
    } while (!GSS_ERROR(maj_stat) && msg_ctx != 0);
