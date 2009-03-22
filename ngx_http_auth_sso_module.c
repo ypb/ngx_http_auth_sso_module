@@ -102,28 +102,28 @@ static ngx_command_t ngx_http_auth_sso_commands[] = {
        void *post; }
   */
 
-  { ngx_string("auth_sso"),
+  { ngx_string("auth_gss"),
     NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
     ngx_conf_set_flag_slot,
     NGX_HTTP_LOC_CONF_OFFSET,
     offsetof(ngx_http_auth_sso_loc_conf_t, protect),
     NULL },
 
-  { ngx_string("auth_sso_realm"),
+  { ngx_string("auth_gss_realm"),
     NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
     ngx_conf_set_str_slot,
     NGX_HTTP_LOC_CONF_OFFSET,
     offsetof(ngx_http_auth_sso_loc_conf_t, realm),
     NULL },
 
-  { ngx_string("auth_sso_keytab"),
+  { ngx_string("auth_gss_keytab"),
     NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
     ngx_conf_set_str_slot,
     NGX_HTTP_LOC_CONF_OFFSET,
     offsetof(ngx_http_auth_sso_loc_conf_t, keytab),
     NULL },
 
-  { ngx_string("auth_sso_srvcname"),
+  { ngx_string("auth_gss_service_name"),
     /* TODO change to NGX_CONF_1MORE for "http", "khttp", besides "HTTP" */
     NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
     ngx_conf_set_str_slot,
