@@ -592,7 +592,8 @@ ngx_http_auth_sso_auth_user_gss(ngx_http_request_t *r,
   }
 
   if (output_token.length) {
-    ngx_str_t user = { output_token.length - 1,
+    /* TOFIX dirty quick trick for now (no "-1" i.e. include '\0' */
+    ngx_str_t user = { output_token.length,
 		       (u_char *) output_token.value };
 
     r->headers_in.user.data = ngx_pstrdup(r->pool, &user);
