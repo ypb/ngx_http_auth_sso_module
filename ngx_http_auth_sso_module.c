@@ -360,7 +360,7 @@ ngx_http_auth_sso_set_bogus_authorization(ngx_http_request_t *r)
     return NGX_ERROR;
   }
 
-  ngx_snprintf(plain.data, plain.len, "%V:bogus", r->headers_in.user);
+  ngx_snprintf(plain.data, plain.len, "%V:bogus", &r->headers_in.user);
 
   encoded.len = ngx_base64_encoded_length(plain.len);
   encoded.data = ngx_pnalloc(r->pool, encoded.len);
@@ -376,7 +376,7 @@ ngx_http_auth_sso_set_bogus_authorization(ngx_http_request_t *r)
     return NGX_ERROR;
   }
 
-  ngx_snprintf(final.data, final.len, "Basic %V", encoded);
+  ngx_snprintf(final.data, final.len, "Basic %V", &encoded);
 
   /* WARNING clobbering authorization header value */
   r->headers_in.authorization->value.len = final.len;
