@@ -336,6 +336,57 @@ ngx_http_auth_sso_token(ngx_http_request_t *r,
   return NGX_OK;
 }
 
+/*
+  Because 'remote_user' is assumed to be provided by basic authorization
+  (see ngx_http_variable_remote_user) we are forced to create bogus
+  non-Negotiate authorization header. This may possibly clobber Negotiate
+  token too soon.
+*/
+
+ngx_int_t
+ngx_http_auth_sso_set_bogus_authorization(ngx_http_request_t *r)
+{
+  ngx_str_t plain, encoded, final;
+  /* jezuz 3 allocs ;( */
+  
+  if (r->headers_in.user.len == 0) {
+    return NGX_DECLINED;
+  }
+
+  /* including \0 from sizeof because it's "user:password" */
+  plain.len = r->headers_in.user.len + sizeof("bogus");
+  plain.data = ngx_pnalloc(r->pool, plain.len);
+  if (plain.data == NULL) {
+    return NGX_ERROR;
+  }
+
+  ngx_snprintf(plain.data, plain.len, "%V:bogus", r->headers_in.user);
+
+  encoded.len = ngx_base64_encoded_length(plain.len);
+  encoded.data = ngx_pnalloc(r->pool, encoded.len);
+  if (encoded.data == NULL) {
+    return NGX_ERROR;
+  }
+
+  if (ngx_encode_base64(&encoded, &plain) != NGX_OK) {
+    return NGX_ERROR;
+  }
+
+  final.len = sizeof("Basic ") + encoded.len - 1;
+  final.data = ngx_pnalloc(r->pool, final.len);
+  if (final.data == NULL) {
+    return NGX_ERROR;
+  }
+
+  ngx_snprintf(final.data, final.len, "Basic %V", encoded);
+
+  /* WARNING clobbering authorization header value */
+  r->headers_in.authorization->value.len = final.len;
+  r->headers_in.authorization->value.data = final.data;
+
+  return NGX_OK;
+}
+
 ngx_int_t
 ngx_http_auth_sso_auth_user_gss(ngx_http_request_t *r,
 				ngx_http_auth_sso_ctx_t *ctx,
@@ -605,6 +656,8 @@ ngx_http_auth_sso_auth_user_gss(ngx_http_request_t *r,
       if (ngx_strcmp(p+1, alcf->realm.data) == 0) {
 	*p = '\0';
 	r->headers_in.user.len = ngx_strlen(r->headers_in.user.data);
+	/* this for the sake of ngx_http_variable_remote_user */
+	ngx_http_auth_sso_set_bogus_authorization(r);
       }
     }
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
