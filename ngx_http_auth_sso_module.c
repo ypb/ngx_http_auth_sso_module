@@ -368,9 +368,7 @@ ngx_http_auth_sso_set_bogus_authorization(ngx_http_request_t *r)
     return NGX_ERROR;
   }
 
-  if (ngx_encode_base64(&encoded, &plain) != NGX_OK) {
-    return NGX_ERROR;
-  }
+  ngx_encode_base64(&encoded, &plain);
 
   final.len = sizeof("Basic ") + encoded.len - 1;
   final.data = ngx_pnalloc(r->pool, final.len);
