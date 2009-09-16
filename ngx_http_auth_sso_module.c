@@ -87,6 +87,7 @@ typedef struct {
   ngx_str_t realm;
   ngx_str_t keytab;
   ngx_str_t srvcname;
+  ngx_flag_t fqun;
 } ngx_http_auth_sso_loc_conf_t;
 
 /* Module Directives */
@@ -129,6 +130,13 @@ static ngx_command_t ngx_http_auth_sso_commands[] = {
     ngx_conf_set_str_slot,
     NGX_HTTP_LOC_CONF_OFFSET,
     offsetof(ngx_http_auth_sso_loc_conf_t, srvcname),
+    NULL },
+
+  { ngx_string("auth_gss_format_full"),
+    NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
+    ngx_conf_set_flag_slot,
+    NGX_HTTP_LOC_CONF_OFFSET,
+    offsetof(ngx_http_auth_sso_loc_conf_t, fqun),
     NULL },
 
   ngx_null_command
@@ -181,6 +189,7 @@ ngx_http_auth_sso_create_loc_conf(ngx_conf_t *cf)
   }
 
   conf->protect = NGX_CONF_UNSET;
+  conf->fqun = NGX_CONF_UNSET;
 
   /* temporary "debug" */
   ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
@@ -205,6 +214,8 @@ ngx_http_auth_sso_merge_loc_conf(ngx_conf_t *cf,
   ngx_conf_merge_str_value(conf->keytab, prev->keytab, "/etc/krb5.keytab");
   ngx_conf_merge_str_value(conf->srvcname, prev->srvcname, "HTTP");
 
+  ngx_conf_merge_off_value(conf->fqun, prev->fqun, 0);
+
   /* TODO make it only shout in debug */
   ngx_conf_log_error(NGX_LOG_EMERG, cf, 0, "auth_sso: protect = %i",
 		     conf->protect);
@@ -214,6 +225,8 @@ ngx_http_auth_sso_merge_loc_conf(ngx_conf_t *cf,
 		     conf->keytab.data, conf->keytab.data);
   ngx_conf_log_error(NGX_LOG_EMERG, cf, 0, "auth_sso: srvcname@0x%p = %s",
 		     conf->srvcname.data, conf->srvcname.data);
+  ngx_conf_log_error(NGX_LOG_EMERG, cf, 0, "auth_sso: fqun = %i",
+		     conf->fqun);
 
   return NGX_CONF_OK;
 }
@@ -649,15 +662,19 @@ ngx_http_auth_sso_auth_user_gss(ngx_http_request_t *r,
     /* NULL?!? */
     r->headers_in.user.len = user.len;
 
-    p = ngx_strchr(r->headers_in.user.data, '@');
-    if (p != NULL) {
-      if (ngx_strcmp(p+1, alcf->realm.data) == 0) {
-	*p = '\0';
-	r->headers_in.user.len = ngx_strlen(r->headers_in.user.data);
-	/* this for the sake of ngx_http_variable_remote_user */
-	ngx_http_auth_sso_set_bogus_authorization(r);
+    if (alcf->fqun == 0) {
+      p = ngx_strchr(r->headers_in.user.data, '@');
+      if (p != NULL) {
+	if (ngx_strcmp(p+1, alcf->realm.data) == 0) {
+	  *p = '\0';
+	  r->headers_in.user.len = ngx_strlen(r->headers_in.user.data);
+	}
       }
     }
+
+    /* this for the sake of ngx_http_variable_remote_user */
+    ngx_http_auth_sso_set_bogus_authorization(r);
+
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
 		   "user is %V", &r->headers_in.user);
   }
