@@ -104,21 +104,21 @@ static ngx_command_t ngx_http_auth_sso_commands[] = {
   */
 
   { ngx_string("auth_gss"),
-    NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
+    NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
     ngx_conf_set_flag_slot,
     NGX_HTTP_LOC_CONF_OFFSET,
     offsetof(ngx_http_auth_sso_loc_conf_t, protect),
     NULL },
 
   { ngx_string("auth_gss_realm"),
-    NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+    NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
     ngx_conf_set_str_slot,
     NGX_HTTP_LOC_CONF_OFFSET,
     offsetof(ngx_http_auth_sso_loc_conf_t, realm),
     NULL },
 
   { ngx_string("auth_gss_keytab"),
-    NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+    NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
     ngx_conf_set_str_slot,
     NGX_HTTP_LOC_CONF_OFFSET,
     offsetof(ngx_http_auth_sso_loc_conf_t, keytab),
@@ -126,14 +126,14 @@ static ngx_command_t ngx_http_auth_sso_commands[] = {
 
   { ngx_string("auth_gss_service_name"),
     /* TODO change to NGX_CONF_1MORE for "http", "khttp", besides "HTTP" */
-    NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+    NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
     ngx_conf_set_str_slot,
     NGX_HTTP_LOC_CONF_OFFSET,
     offsetof(ngx_http_auth_sso_loc_conf_t, srvcname),
     NULL },
 
   { ngx_string("auth_gss_format_full"),
-    NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
+    NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
     ngx_conf_set_flag_slot,
     NGX_HTTP_LOC_CONF_OFFSET,
     offsetof(ngx_http_auth_sso_loc_conf_t, fqun),
@@ -192,8 +192,10 @@ ngx_http_auth_sso_create_loc_conf(ngx_conf_t *cf)
   conf->fqun = NGX_CONF_UNSET;
 
   /* temporary "debug" */
-  ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+#if (NGX_DEBUG)
+  ngx_conf_log_error(NGX_LOG_INFO, cf, 0,
 		     "auth_sso: allocated loc_conf_t (0x%p)", conf);
+#endif
   /* TODO find out if there is way to enable it only in debug mode */
 
   return conf;
@@ -217,16 +219,18 @@ ngx_http_auth_sso_merge_loc_conf(ngx_conf_t *cf,
   ngx_conf_merge_off_value(conf->fqun, prev->fqun, 0);
 
   /* TODO make it only shout in debug */
-  ngx_conf_log_error(NGX_LOG_EMERG, cf, 0, "auth_sso: protect = %i",
+#if (NGX_DEBUG)
+  ngx_conf_log_error(NGX_LOG_INFO, cf, 0, "auth_sso: protect = %i",
 		     conf->protect);
-  ngx_conf_log_error(NGX_LOG_EMERG, cf, 0, "auth_sso: realm@0x%p = %s",
+  ngx_conf_log_error(NGX_LOG_INFO, cf, 0, "auth_sso: realm@0x%p = %s",
 		     conf->realm.data, conf->realm.data);
-  ngx_conf_log_error(NGX_LOG_EMERG, cf, 0, "auth_sso: keytab@0x%p = %s",
+  ngx_conf_log_error(NGX_LOG_INFO, cf, 0, "auth_sso: keytab@0x%p = %s",
 		     conf->keytab.data, conf->keytab.data);
-  ngx_conf_log_error(NGX_LOG_EMERG, cf, 0, "auth_sso: srvcname@0x%p = %s",
+  ngx_conf_log_error(NGX_LOG_INFO, cf, 0, "auth_sso: srvcname@0x%p = %s",
 		     conf->srvcname.data, conf->srvcname.data);
-  ngx_conf_log_error(NGX_LOG_EMERG, cf, 0, "auth_sso: fqun = %i",
+  ngx_conf_log_error(NGX_LOG_INFO, cf, 0, "auth_sso: fqun = %i",
 		     conf->fqun);
+#endif
 
   return NGX_CONF_OK;
 }
