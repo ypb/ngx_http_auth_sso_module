@@ -1,0 +1,1 @@
+GSSAPI_LIBS="`krb5-config --libs gssapi`"

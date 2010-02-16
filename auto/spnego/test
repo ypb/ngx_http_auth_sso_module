@@ -1,0 +1,67 @@
+
+echo $ngx_n "checking if GSSAPI supports SPNEGO"
+
+cat << END >> $NGX_AUTOCONF_ERR
+
+----------------------------------------
+checking if GSSAPI supports SPNEGO
+
+END
+
+ngx_found=no
+
+cat << END > $NGX_AUTOTEST.c
+
+#include <string.h>
+#include <krb5.h>
+#ifdef HEIMDAL
+#include <gssapi.h>
+#else
+#include <gssapi/gssapi.h>
+#endif
+int main(int argc, char** argv)
+{
+       OM_uint32 major_status, minor_status;
+       gss_OID_set mech_set;
+       gss_OID_desc spnego_oid_desc = {6, (void *)"\x2b\x06\x01\x05\x05\x02"};
+       int SPNEGO = 0;
+                                                                               
+       major_status = gss_indicate_mechs(&minor_status, &mech_set);
+       if (GSS_ERROR(major_status))
+               return 1;
+       else {
+               unsigned int i;
+               for (i=0; i < mech_set->count && !SPNEGO; i++) {
+                       gss_OID tmp_oid = &mech_set->elements[i];
+                      if (tmp_oid->length == spnego_oid_desc.length &&
+                           !memcmp(tmp_oid->elements, spnego_oid_desc.elements, 
+                                   tmp_oid->length)) {
+                               SPNEGO = 1;
+                               break;
+                       }
+               }
+               gss_release_oid_set(&minor_status, &mech_set);
+               return (!SPNEGO);
+       }
+}
+
+END
+
+eval "$CC $cc_test_flags $ngx_lib_cflags \
+     -o $NGX_AUTOTEST $NGX_AUTOTEST.c $ngx_libs $GSSAPI_LIBS \
+     >> $NGX_ERR 2>&1"
+
+if [ -x $NGX_AUTOTEST ]; then
+    $NGX_AUTOTEST >/dev/null 2>&1
+    if [ "$?" -eq 0 ]; then
+	echo " yes"
+
+	ngx_found=yes
+    else
+	echo " no"
+    fi
+else
+    echo " no"
+fi
+
+rm $NGX_AUTOTEST*
