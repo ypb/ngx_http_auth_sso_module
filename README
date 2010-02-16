@@ -1,62 +1,80 @@
-Nginx module to use SPNEGO+GSSAPI+Kerberos for http SSO authentication
-======================================================================
+ngx_http_auth_sso_module - single sign-on authentication module for Nginx
+==============================================================================
 
-Whatsizit
----------
+What is it?
+-----------
 
-Code 97% stolen from mod_auth_gss_krb5 (http://modgssapache.sf.net);
-version 0.0.5.
+This is a port of version 0.0.5 of Apache mod_auth_gss_krb5 module (see
+http://modgssapache.sf.net) to Nginx (see http://nginx.org). It enables
+handling of the so called "Single Sign-on" authentication.
+
+Technically speaking it uses Simple and Protected Generic Security Service
+Application Program Interface (GSS-API - see RFC 2743) Negotiation Mechanism
+(SPNEGO - see RFC 4178) in Kerberos (see RFC 4120) enabled environments (like
+the so called MS Active Directory) to permit browsing of restricted content
+through HTTP after only authenticating to the system once upon logging into
+ workstation or other terminal.
 
 Compilation
 -----------
 
-First you need to compile the spnegohelp dynamic library. 'make' in that
-subdirectory should do it, then place it by hand somewhere where linker
-and loader can find it by default (probably /usr/lib or perhaps even
-/usr/local/lib depending on your setup).
+First you need to install the spnegohelp dynamic library. Executing 'make' in
+that sub-directory should compile it. Next put it by hand in a place where
+linker and loader can find it (most probably '/usr/lib' by default or you may
+prefer using '/usr/local/lib' in order to not pollute system with non-packaged
+software).
 
-When compiling from source build as usual adding the -add-module option:
+When compiling Nginx from source build as usual adding another add-module
+option to the command:
 
-  ./configure --add-module=$PATH_TO_MODULE
+  ./configure --add-module=PATH_TO_NGX_HTTP_AUTH_SSO_MODULE_DIRECTORY
 
-inside top Nginx source directory.
+executed inside top of the Nginx source directory.
 
 Configuration
 -------------
 
 The module has following directives:
 
-- auth_gss: "on"/"off", for ease of unsecuring while leaving other
-  options in the config file,
+- auth_gss: "on"/"off", defaults to "off" even if you set other options,
 
 - auth_gss_realm: what Kerberos realm name to use, for now only used to
-  remove it from full user@realm.name,
+  remove it from fully qualified user@REALM names, (default: LOCALDOMAIN)
 
 - auth_gss_keytab: absolute path-name to keytab file containing service
-  credentials,
+  credentials, (default: /etc/krb5.keytab)
 
 - auth_gss_service_name: what service name to use when acquiring
-  credentials. (TOFIX: HTTP but should be a list in case of some other
-  browsers wanting perhaps khttp or http)
+  credentials, (default: HTTP)
+  TOFIX: should be a list in case of some other browsers asking for "khttp"
+  or "http"
 
-TOFIX: for now they are all merely location specific. i.e. no way to
-specify main or per server defaults, except for ...
+- auth_gss_format_full: "on"/"off", preserve @REALM part in user name
+  added to the http header upon successful authentication. (default: off)
 
-Examples
---------
+all switches are hierarchy aware supporting http, server and location scope.
 
-... current "hardcodeds" ;-}
+Example
+-------
+
+http {
+
+auth_gss_realm MY.LOCAL.DOMAIN.TM;
+auth_gss_keytab /usr/local/nginx/conf/krb5.keytab;
+auth_gss_service_name HTTP;
+auth_gss_format_full on;
+
+server {
 
 location /topsecret {
   auth_gss on;
-  auth_gss_realm LOCALDOMAIN;
-  auth_gss_keytab /etc/krb5.keytab;
-  auth_gss_service_name HTTP;
 }
 
-Additional steps...
+}}
+
+Additional notes...
 -------------------
 
-pray for no segfaults...
+TOFIX: add instructions on how to create the service keytab and other important
+notes about otherwise setting up the environment.
 
-TOFIX: perhaps add instructions on how to create the service keytab...
